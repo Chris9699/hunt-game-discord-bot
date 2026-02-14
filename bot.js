@@ -15,8 +15,6 @@ client.on('clientReady', () => {
 });
 
 client.on('messageCreate', (message) => {
-  if (message.author.bot) return;
-  
   if (message.channel.name === PING_CHANNEL) {
     console.log(`[${message.author.username}] ${message.content}`);
   }
