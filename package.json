@@ -4,8 +4,7 @@
   "main": "bot.js",
   "dependencies": {
     "discord.js": "^14.13.0",
-    "googleapis": "^118.0.0",
-    "google-auth-library": "^9.0.0"
+    "googleapis": "^118.0.0"
   },
   "scripts": {
     "start": "node bot.js"
