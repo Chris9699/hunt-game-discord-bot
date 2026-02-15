@@ -4,11 +4,9 @@ const fs = require('fs');
 
 const PING_CHANNEL = process.env.PING_CHANNEL || 'pings';
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
-const GOOGLE_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 const GOOGLE_CREDENTIALS_B64 = process.env.GOOGLE_CREDENTIALS_B64;
 
 let sheets;
-let drive;
 let auth;
 
 const client = new Client({
@@ -28,15 +26,11 @@ client.on('clientReady', () => {
     
     auth = new google.auth.GoogleAuth({
       credentials,
-      scopes: [
-        'https://www.googleapis.com/auth/spreadsheets',
-        'https://www.googleapis.com/auth/drive'
-      ]
+      scopes: ['https://www.googleapis.com/auth/spreadsheets']
     });
     
     sheets = google.sheets({ version: 'v4', auth });
-    drive = google.drive({ version: 'v3', auth });
-    console.log(`✅ Google APIs initialized`);
+    console.log(`✅ Google Sheets initialized`);
   } catch (error) {
     console.error(`❌ Google init failed: ${error.message}`);
   }
@@ -72,13 +66,13 @@ client.on('messageCreate', async (message) => {
       }
     });
     
-    console.log(`✅ Row added to sheet`);
+    console.log(`✅ Row added`);
     
-    // Create test.kml
-    const testKml = `<?xml version="1.0" encoding="UTF-8"?>
+    // Create KML
+    const kml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <name>Test</name>
+    <name>${player}</name>
     <Placemark>
       <name>${time}</name>
       <description>${player}</description>
@@ -89,27 +83,20 @@ client.on('messageCreate', async (message) => {
   </Document>
 </kml>`;
     
-    fs.writeFileSync('test.kml', testKml);
-    console.log(`✅ test.kml created`);
+    const kmlFile = `${player}.kml`;
+    fs.writeFileSync(kmlFile, kml);
+    console.log(`✅ ${kmlFile} created`);
     
-    // Upload to Drive
-    const fileMetadata = {
-      name: 'test.kml',
-      parents: [GOOGLE_DRIVE_FOLDER_ID]
-    };
-    
-    const media = {
-      mimeType: 'application/vnd.google-earth.kml+xml',
-      body: fs.createReadStream('test.kml')
-    };
-    
-    await drive.files.create({
-      resource: fileMetadata,
-      media
+    // Send as Discord attachment
+    await message.channel.send({
+      files: [kmlFile]
     });
     
-    console.log(`✅ test.kml uploaded to Drive`);
-    message.reply(`✅ Ping gespeichert & KML uploaded`);
+    console.log(`✅ KML sent to Discord`);
+    message.reply(`✅ Ping gespeichert: ${player}`);
+    
+    // Cleanup
+    fs.unlinkSync(kmlFile);
   } catch (error) {
     console.error(`❌ Error: ${error.message}`);
     message.reply(`❌ ${error.message}`);
