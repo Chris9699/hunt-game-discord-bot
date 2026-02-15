@@ -35,7 +35,7 @@ client.on('messageCreate', (message) => {
     return;
   }
 
-  const match = message.content.match(/Player:\s*(\w+),\s*Lat:\s*([\d.-]+),\s*Lon:\s*([\d.-]+),\s*Time:\s*(.+)/i);
+  const match = message.content.match(/Player:\s*(.+?),\s*Lat:\s*([\d.-]+),\s*Lon:\s*([\d.-]+),\s*Time:\s*(.+)/i);
   
   if (!match) {
     console.log(`❌ Format nicht erkannt`);
@@ -83,3 +83,4 @@ function loadGeoData() {
 }
 
 client.login(process.env.DISCORD_TOKEN);
+
