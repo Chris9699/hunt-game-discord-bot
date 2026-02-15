@@ -83,7 +83,7 @@ client.on('messageCreate', async (message) => {
     
     await sheets.spreadsheets.values.append({
       spreadsheetId: GOOGLE_SHEET_ID,
-      range: `${player}!A:C`,
+      range: `${player}!A2:C`,
       valueInputOption: 'RAW',
       requestBody: { values: [[lat, lon, time]] }
     });
@@ -93,7 +93,7 @@ client.on('messageCreate', async (message) => {
     // Generate player KML
     const playerResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: GOOGLE_SHEET_ID,
-      range: `${player}!A:C`
+      range: `${player}!A1:C`
     });
     
     const playerRows = playerResponse.data.values?.slice(1) || [];
@@ -106,7 +106,7 @@ client.on('messageCreate', async (message) => {
       
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: GOOGLE_SHEET_ID,
-        range: `${sheetName}!A:C`
+        range: `${sheetName}!A1:C`
       });
       
       const rows = response.data.values?.slice(1) || [];
@@ -235,7 +235,7 @@ async function getMsgId(player, type = 'player') {
   try {
     const rows = await sheets.spreadsheets.values.get({
       spreadsheetId: GOOGLE_SHEET_ID,
-      range: 'Data!A:C'
+      range: 'Data!A1:C'
     });
     
     const data = rows.data.values || [];
@@ -251,7 +251,7 @@ async function saveMsgId(player, msgId, type = 'player') {
   try {
     const rows = await sheets.spreadsheets.values.get({
       spreadsheetId: GOOGLE_SHEET_ID,
-      range: 'Data!A:C'
+      range: 'Data!A1:C'
     });
     
     const data = rows.data.values || [];
@@ -268,7 +268,7 @@ async function saveMsgId(player, msgId, type = 'player') {
     } else {
       await sheets.spreadsheets.values.append({
         spreadsheetId: GOOGLE_SHEET_ID,
-        range: 'Data!A:C',
+        range: 'Data!A2:C',
         valueInputOption: 'RAW',
         requestBody: { values: [[player, msgId, type]] }
       });
