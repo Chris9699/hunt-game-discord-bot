@@ -40,7 +40,6 @@ client.on('clientReady', () => {
 client.on('messageCreate', async (message) => {
   if (message.channel.name !== PING_CHANNEL) return;
   if (message.author.bot) return;
-  
   if (!message.content.startsWith('NEUER PING')) return;
 
   const match = message.content.match(/NEUER PING - (.+?) \((.+?)\): Lat([\d.-]+) Lon([\d.-]+)/i);
@@ -87,7 +86,7 @@ client.on('messageCreate', async (message) => {
       requestBody: { values: [[lat, lon, time]] }
     });
     
-    console.log(`✅ Ping added`);
+    console.log(`✅ Ping added to ${player}`);
     
     // Generate player KML
     const playerResponse = await sheets.spreadsheets.values.get({
@@ -98,11 +97,10 @@ client.on('messageCreate', async (message) => {
     const playerRows = playerResponse.data.values?.slice(1) || [];
     const playerKml = generateKML(player, playerRows);
     
-    // Generate latest.kml with all players' latest pings
+    // Generate latest.kml
     const latestPlacemarks = [];
-    
     for (const sheetName of sheetNames) {
-      if (sheetName === sheetNames[0]) continue; // Skip first sheet
+      if (sheetName === sheetNames[0]) continue;
       
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: GOOGLE_SHEET_ID,
@@ -142,8 +140,7 @@ ${latestPlacemarks.map(p => `
     
     fs.writeFileSync(playerKmlFile, playerKml);
     fs.writeFileSync(latestKmlFile, latestKml);
-    
-    console.log(`✅ KMLs generated: ${playerKmlFile}, ${latestKmlFile}`);
+    console.log(`✅ KMLs generated`);
     
     const kmlChannel = message.guild.channels.cache.find(ch => ch.name === KML_CHANNEL);
     if (!kmlChannel) {
@@ -151,12 +148,27 @@ ${latestPlacemarks.map(p => `
       return;
     }
     
-    await kmlChannel.send({
+    // Delete old message if exists
+    const oldMsgId = await getMsgId(player);
+    if (oldMsgId) {
+      try {
+        const oldMsg = await kmlChannel.messages.fetch(oldMsgId);
+        await oldMsg.delete();
+        console.log(`🗑️ Deleted old ${player} message`);
+      } catch (e) {
+        console.log(`⚠️ Could not delete old message: ${e.message}`);
+      }
+    }
+    
+    // Send new message
+    const sentMessage = await kmlChannel.send({
       content: `📍 **${player}** (${playerRows.length} pings)`,
       files: [playerKmlFile, latestKmlFile]
     });
     
-    console.log(`✅ KMLs sent`);
+    await saveMsgId(player, sentMessage.id);
+    console.log(`✅ KMLs sent & message ID saved`);
+    
     message.reply(`✅ ${player} gespeichert (${playerRows.length} pings)`);
     
     fs.unlinkSync(playerKmlFile);
@@ -166,6 +178,54 @@ ${latestPlacemarks.map(p => `
     message.reply(`❌ ${error.message}`);
   }
 });
+
+async function getMsgId(player) {
+  try {
+    const rows = await sheets.spreadsheets.values.get({
+      spreadsheetId: GOOGLE_SHEET_ID,
+      range: 'Data!A:B'
+    });
+    
+    const data = rows.data.values || [];
+    const row = data.find(r => r[0] === player);
+    return row ? row[1] : null;
+  } catch (e) {
+    console.log(`⚠️ Could not get msg ID: ${e.message}`);
+    return null;
+  }
+}
+
+async function saveMsgId(player, msgId) {
+  try {
+    const rows = await sheets.spreadsheets.values.get({
+      spreadsheetId: GOOGLE_SHEET_ID,
+      range: 'Data!A:B'
+    });
+    
+    const data = rows.data.values || [];
+    const playerRowIndex = data.findIndex(r => r[0] === player);
+    
+    if (playerRowIndex >= 0) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: GOOGLE_SHEET_ID,
+        range: `Data!B${playerRowIndex + 1}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [[msgId]] }
+      });
+      console.log(`✅ Updated msg ID for ${player}`);
+    } else {
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: GOOGLE_SHEET_ID,
+        range: 'Data!A:B',
+        valueInputOption: 'RAW',
+        requestBody: { values: [[player, msgId]] }
+      });
+      console.log(`✅ Saved new msg ID for ${player}`);
+    }
+  } catch (e) {
+    console.error(`❌ Could not save msg ID: ${e.message}`);
+  }
+}
 
 function generateKML(player, rows) {
   let placemarks = '';
