@@ -41,7 +41,6 @@ client.on('messageCreate', async (message) => {
   if (message.channel.name !== PING_CHANNEL) return;
   if (message.author.bot) return;
 
-  // Parse: "NEUER PING - Spieler 1 (03.04. 13:00): Lat48.123 Lon11.456"
   const match = message.content.match(/NEUER PING - (.+?) \((.+?)\): Lat([\d.-]+) Lon([\d.-]+)/i);
   
   if (!match) {
@@ -53,23 +52,30 @@ client.on('messageCreate', async (message) => {
   console.log(`✅ Parsed: ${player}, ${time}, ${lat}, ${lon}`);
   
   try {
-    // Sheet append
+    // Get sheet names first
+    const metadata = await sheets.spreadsheets.get({
+      spreadsheetId: GOOGLE_SHEET_ID
+    });
+    
+    const sheetName = metadata.data.sheets[0].properties.title;
+    console.log(`📂 Using sheet: ${sheetName}`);
+    
+    // Append
     await sheets.spreadsheets.values.append({
       spreadsheetId: GOOGLE_SHEET_ID,
-      range: `Sheet1!A1`,
+      range: `${sheetName}!A:D`,
       valueInputOption: 'RAW',
       requestBody: {
         values: [[player, lat, lon, time]]
       }
     });
     
-    console.log(`✅ Row added to Google Sheet`);
-    message.reply(`✅ Daten gespeichert: ${player}`);
+    console.log(`✅ Row added`);
+    message.reply(`✅ Gespeichert: ${player}`);
   } catch (error) {
-    console.error(`❌ Sheet error: ${error.message}`);
-    message.reply(`❌ Error: ${error.message}`);
+    console.error(`❌ Error: ${error.message}`);
+    message.reply(`❌ ${error.message}`);
   }
 });
 
 client.login(process.env.DISCORD_TOKEN);
-
