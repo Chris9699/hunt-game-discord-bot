@@ -41,7 +41,6 @@ client.on('clientReady', async () => {
 
 client.on('messageCreate', async (message) => {
   if (message.channel.name !== PING_CHANNEL) return;
-  if (message.author.bot) return;
   if (!message.content.startsWith('NEUER PING')) return;
 
   const match = message.content.match(/NEUER PING - (.+?) \((.+?)\): Lat([\d.-]+) Lon([\d.-]+)/i);
@@ -317,3 +316,4 @@ function generateKML(player, rows) {
 }
 
 client.login(process.env.DISCORD_TOKEN);
+
