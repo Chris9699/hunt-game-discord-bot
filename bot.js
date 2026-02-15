@@ -5,7 +5,7 @@ const fs = require('fs');
 const PING_CHANNEL = process.env.PING_CHANNEL || 'pings';
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const GOOGLE_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
-const GOOGLE_CREDENTIALS = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+const GOOGLE_CREDENTIALS = JSON.parse(Buffer.from(process.env.GOOGLE_CREDENTIALS_B64, 'base64').toString());
 
 let sheets;
 let drive;
@@ -227,3 +227,4 @@ async function uploadToGoogleDrive(player, kmlPath) {
 }
 
 client.login(process.env.DISCORD_TOKEN);
+
