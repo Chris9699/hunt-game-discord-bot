@@ -18,7 +18,7 @@ const client = new Client({
   ]
 });
 
-client.on('clientReady', () => {
+client.on('clientReady', async () => {
   console.log(`✅ Bot logged in as ${client.user.tag}`);
   
   try {
@@ -32,6 +32,8 @@ client.on('clientReady', () => {
     
     sheets = google.sheets({ version: 'v4', auth });
     console.log(`✅ Google Sheets API initialized`);
+    
+    await ensureDataSheet();
   } catch (error) {
     console.error(`❌ Google init error: ${error.message}`);
   }
@@ -100,7 +102,7 @@ client.on('messageCreate', async (message) => {
     // Generate latest.kml
     const latestPlacemarks = [];
     for (const sheetName of sheetNames) {
-      if (sheetName === sheetNames[0]) continue;
+      if (sheetName === sheetNames[0] || sheetName === 'Data') continue;
       
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: GOOGLE_SHEET_ID,
@@ -148,26 +150,45 @@ ${latestPlacemarks.map(p => `
       return;
     }
     
-    // Delete old message if exists
-    const oldMsgId = await getMsgId(player);
-    if (oldMsgId) {
+    // Update player KML
+    const oldPlayerMsgId = await getMsgId(player, 'player');
+    if (oldPlayerMsgId) {
       try {
-        const oldMsg = await kmlChannel.messages.fetch(oldMsgId);
+        const oldMsg = await kmlChannel.messages.fetch(oldPlayerMsgId);
         await oldMsg.delete();
         console.log(`🗑️ Deleted old ${player} message`);
       } catch (e) {
-        console.log(`⚠️ Could not delete old message: ${e.message}`);
+        console.log(`⚠️ Could not delete old message`);
       }
     }
     
-    // Send new message
-    const sentMessage = await kmlChannel.send({
+    const playerMessage = await kmlChannel.send({
       content: `📍 **${player}** (${playerRows.length} pings)`,
-      files: [playerKmlFile, latestKmlFile]
+      files: [playerKmlFile]
     });
     
-    await saveMsgId(player, sentMessage.id);
-    console.log(`✅ KMLs sent & message ID saved`);
+    await saveMsgId(player, playerMessage.id, 'player');
+    console.log(`✅ Player KML sent`);
+    
+    // Update latest KML
+    const oldLatestMsgId = await getMsgId('latest', 'latest');
+    if (oldLatestMsgId) {
+      try {
+        const oldMsg = await kmlChannel.messages.fetch(oldLatestMsgId);
+        await oldMsg.delete();
+        console.log(`🗑️ Deleted old latest message`);
+      } catch (e) {
+        console.log(`⚠️ Could not delete old latest message`);
+      }
+    }
+    
+    const latestMessage = await kmlChannel.send({
+      content: `🗺️ **Latest Pings** (${latestPlacemarks.length} players)`,
+      files: [latestKmlFile]
+    });
+    
+    await saveMsgId('latest', latestMessage.id, 'latest');
+    console.log(`✅ Latest KML sent`);
     
     message.reply(`✅ ${player} gespeichert (${playerRows.length} pings)`);
     
@@ -179,15 +200,46 @@ ${latestPlacemarks.map(p => `
   }
 });
 
-async function getMsgId(player) {
+async function ensureDataSheet() {
+  try {
+    const metadata = await sheets.spreadsheets.get({
+      spreadsheetId: GOOGLE_SHEET_ID
+    });
+    
+    const sheetNames = metadata.data.sheets.map(s => s.properties.title);
+    
+    if (!sheetNames.includes('Data')) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: GOOGLE_SHEET_ID,
+        requestBody: {
+          requests: [{
+            addSheet: { properties: { title: 'Data' } }
+          }]
+        }
+      });
+      
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: GOOGLE_SHEET_ID,
+        range: 'Data!A1:C1',
+        valueInputOption: 'RAW',
+        requestBody: { values: [['player', 'msg_id', 'type']] }
+      });
+      console.log(`✅ Data sheet created`);
+    }
+  } catch (error) {
+    console.error(`❌ Error ensuring Data sheet: ${error.message}`);
+  }
+}
+
+async function getMsgId(player, type = 'player') {
   try {
     const rows = await sheets.spreadsheets.values.get({
       spreadsheetId: GOOGLE_SHEET_ID,
-      range: 'Data!A:B'
+      range: 'Data!A:C'
     });
     
     const data = rows.data.values || [];
-    const row = data.find(r => r[0] === player);
+    const row = data.find(r => r[0] === player && r[2] === type);
     return row ? row[1] : null;
   } catch (e) {
     console.log(`⚠️ Could not get msg ID: ${e.message}`);
@@ -195,15 +247,15 @@ async function getMsgId(player) {
   }
 }
 
-async function saveMsgId(player, msgId) {
+async function saveMsgId(player, msgId, type = 'player') {
   try {
     const rows = await sheets.spreadsheets.values.get({
       spreadsheetId: GOOGLE_SHEET_ID,
-      range: 'Data!A:B'
+      range: 'Data!A:C'
     });
     
     const data = rows.data.values || [];
-    const playerRowIndex = data.findIndex(r => r[0] === player);
+    const playerRowIndex = data.findIndex(r => r[0] === player && r[2] === type);
     
     if (playerRowIndex >= 0) {
       await sheets.spreadsheets.values.update({
@@ -212,15 +264,15 @@ async function saveMsgId(player, msgId) {
         valueInputOption: 'RAW',
         requestBody: { values: [[msgId]] }
       });
-      console.log(`✅ Updated msg ID for ${player}`);
+      console.log(`✅ Updated ${type} msg ID for ${player}`);
     } else {
       await sheets.spreadsheets.values.append({
         spreadsheetId: GOOGLE_SHEET_ID,
-        range: 'Data!A:B',
+        range: 'Data!A:C',
         valueInputOption: 'RAW',
-        requestBody: { values: [[player, msgId]] }
+        requestBody: { values: [[player, msgId, type]] }
       });
-      console.log(`✅ Saved new msg ID for ${player}`);
+      console.log(`✅ Saved new ${type} msg ID for ${player}`);
     }
   } catch (e) {
     console.error(`❌ Could not save msg ID: ${e.message}`);
