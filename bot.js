@@ -1,16 +1,15 @@
 const { Client, GatewayIntentBits } = require('discord.js');
+const { google } = require('googleapis');
 const fs = require('fs');
-const https = require('https');
 
 const PING_CHANNEL = process.env.PING_CHANNEL || 'pings';
-const GEO_FILE = 'pings.geojson';
-const GIST_ID = process.env.GIST_ID; // z.B. abc123def456
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
+const GOOGLE_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
+const GOOGLE_CREDENTIALS = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 
-let geoData = {
-  type: 'FeatureCollection',
-  features: []
-};
+let sheets;
+let drive;
+let auth;
 
 const client = new Client({
   intents: [
@@ -22,87 +21,209 @@ const client = new Client({
 
 client.on('clientReady', () => {
   console.log(`✅ Bot logged in as ${client.user.tag}`);
-  loadGeoData();
+  initializeGoogle();
 });
 
-client.on('messageCreate', (message) => {
+function initializeGoogle() {
+  auth = new google.auth.GoogleAuth({
+    credentials: GOOGLE_CREDENTIALS,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+  });
+  
+  sheets = google.sheets({ version: 'v4', auth });
+  drive = google.drive({ version: 'v3', auth });
+  console.log(`✅ Google APIs initialized`);
+}
+
+client.on('messageCreate', async (message) => {
   console.log(`📨 Message in ${message.channel.name}: "${message.content}" by ${message.author.username}`);
   
   if (message.channel.name !== PING_CHANNEL) return;
   if (message.author.bot) return;
 
-  const match = message.content.match(/Player:\s*(.+?),\s*Lat:\s*([\d.-]+),\s*Lon:\s*([\d.-]+),\s*Time:\s*(.+)/i);
+  // Parse: "NEUER PING - Spieler 1 (03.04. 13:00): Lat48.123 Lon11.456"
+  const match = message.content.match(/NEUER PING - (.+?) \((.+?)\): Lat([\d.-]+) Lon([\d.-]+)/i);
   
   if (!match) {
     console.log(`❌ Format nicht erkannt`);
     return;
   }
 
-  const [, player, lat, lon, time] = match;
-  console.log(`✅ Parsed: ${player} @ ${lat}, ${lon}`);
+  const [, player, time, lat, lon] = match;
+  console.log(`✅ Parsed: Player=${player}, Time=${time}, Lat=${lat}, Lon=${lon}`);
   
-  addPing(player, parseFloat(lat), parseFloat(lon), time);
-  saveGeoData();
-  pushToGist();
-  
-  message.reply(`✅ Ping: ${player} @ ${time}`);
+  try {
+    await addPingToSheet(player, lat, lon, time);
+    const kmlPath = await generateKML(player);
+    await uploadToGoogleDrive(player, kmlPath);
+    
+    const driveUrl = `https://drive.google.com/drive/folders/${GOOGLE_DRIVE_FOLDER_ID}`;
+    message.reply(`✅ Ping gespeichert: ${player} @ ${time}\n📍 KML in Drive: ${driveUrl}`);
+  } catch (error) {
+    console.error(`❌ Error: ${error.message}`);
+    message.reply(`❌ Fehler beim Speichern: ${error.message}`);
+  }
 });
 
-function addPing(player, lat, lon, time) {
-  geoData.features.push({
-    type: 'Feature',
-    geometry: { type: 'Point', coordinates: [lon, lat] },
-    properties: { player, time, timestamp: new Date().toISOString() }
-  });
-}
-
-function saveGeoData() {
-  fs.writeFileSync(GEO_FILE, JSON.stringify(geoData, null, 2));
-  console.log(`💾 GeoJSON: ${geoData.features.length} features`);
-}
-
-function loadGeoData() {
-  if (fs.existsSync(GEO_FILE)) {
-    geoData = JSON.parse(fs.readFileSync(GEO_FILE));
-  }
-}
-
-function pushToGist() {
-  if (!GIST_ID || !GITHUB_TOKEN) {
-    console.log(`⚠️ GIST_ID oder GITHUB_TOKEN nicht gesetzt`);
-    return;
-  }
-
-  const data = JSON.stringify({
-    files: {
-      'pings.geojson': {
-        content: JSON.stringify(geoData, null, 2)
+async function addPingToSheet(player, lat, lon, time) {
+  try {
+    // Blatt-Namen abrufen
+    const sheetMetadata = await sheets.spreadsheets.get({
+      spreadsheetId: GOOGLE_SHEET_ID
+    });
+    
+    const sheetNames = sheetMetadata.data.sheets.map(s => s.properties.title);
+    console.log(`📂 Existing sheets: ${sheetNames.join(', ')}`);
+    
+    let sheetName = player;
+    
+    // Falls Blatt nicht existiert, erstellen
+    if (!sheetNames.includes(player)) {
+      console.log(`📝 Creating new sheet: ${player}`);
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: GOOGLE_SHEET_ID,
+        requestBody: {
+          requests: [{
+            addSheet: {
+              properties: { title: player }
+            }
+          }]
+        }
+      });
+      
+      // Header-Zeile hinzufügen
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: GOOGLE_SHEET_ID,
+        range: `${player}!A1:C1`,
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: [['Lat', 'Lon', 'Time']]
+        }
+      });
+    }
+    
+    // Daten hinzufügen
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: GOOGLE_SHEET_ID,
+      range: `${player}!A:C`,
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [[lat, lon, time]]
       }
+    });
+    
+    console.log(`✅ Row added to sheet: ${player}`);
+  } catch (error) {
+    console.error(`❌ Sheet error: ${error.message}`);
+    throw error;
+  }
+}
+
+async function generateKML(player) {
+  try {
+    // Daten aus Sheet abrufen
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: GOOGLE_SHEET_ID,
+      range: `${player}!A:C`
+    });
+    
+    const rows = response.data.values || [];
+    if (rows.length < 2) {
+      console.log(`⚠️ No data for ${player}`);
+      return;
     }
-  });
-
-  const options = {
-    hostname: 'api.github.com',
-    path: `/gists/${GIST_ID}`,
-    method: 'PATCH',
-    headers: {
-      'Authorization': `token ${GITHUB_TOKEN}`,
-      'Content-Type': 'application/json',
-      'Content-Length': data.length,
-      'User-Agent': 'Hunt-Game-Bot'
+    
+    // Header überspringen
+    const data = rows.slice(1);
+    
+    // KML generieren
+    let placemarks = '';
+    let coordinates = [];
+    
+    data.forEach((row, index) => {
+      const [lat, lon, time] = row;
+      placemarks += `
+    <Placemark>
+      <name>${time}</name>
+      <description>${player}</description>
+      <Point>
+        <coordinates>${lon},${lat},0</coordinates>
+      </Point>
+    </Placemark>`;
+      coordinates.push(`${lon},${lat},0`);
+    });
+    
+    // Linie hinzufügen
+    if (coordinates.length > 1) {
+      placemarks += `
+    <Placemark>
+      <name>${player} Bewegung</name>
+      <description>Bewegungsverlauf</description>
+      <LineString>
+        <coordinates>
+          ${coordinates.join('\n          ')}
+        </coordinates>
+      </LineString>
+    </Placemark>`;
     }
-  };
+    
+    const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>${player}</name>${placemarks}
+  </Document>
+</kml>`;
+    
+    const kmlPath = `${player}.kml`;
+    fs.writeFileSync(kmlPath, kml);
+    console.log(`✅ KML generated: ${kmlPath}`);
+    return kmlPath;
+  } catch (error) {
+    console.error(`❌ KML error: ${error.message}`);
+    throw error;
+  }
+}
 
-  const req = https.request(options, (res) => {
-    console.log(`✅ Gist updated (${res.statusCode})`);
-  });
-
-  req.on('error', (e) => {
-    console.error(`❌ Gist push failed: ${e.message}`);
-  });
-
-  req.write(data);
-  req.end();
+async function uploadToGoogleDrive(player, kmlPath) {
+  try {
+    // Prüfe ob Datei existiert
+    const listResponse = await drive.files.list({
+      q: `name='${player}.kml' and parents='${GOOGLE_DRIVE_FOLDER_ID}' and trashed=false`,
+      spaces: 'drive',
+      fields: 'files(id)'
+    });
+    
+    const fileMetadata = {
+      name: `${player}.kml`,
+      parents: [GOOGLE_DRIVE_FOLDER_ID]
+    };
+    
+    const media = {
+      mimeType: 'application/vnd.google-earth.kml+xml',
+      body: fs.createReadStream(kmlPath)
+    };
+    
+    if (listResponse.data.files.length > 0) {
+      // Update existierende Datei
+      await drive.files.update({
+        fileId: listResponse.data.files[0].id,
+        media
+      });
+      console.log(`✅ Drive file updated: ${player}.kml`);
+    } else {
+      // Neue Datei erstellen
+      await drive.files.create({
+        resource: fileMetadata,
+        media
+      });
+      console.log(`✅ Drive file created: ${player}.kml`);
+    }
+    
+    fs.unlinkSync(kmlPath); // Lokale Datei löschen
+  } catch (error) {
+    console.error(`❌ Drive error: ${error.message}`);
+    throw error;
+  }
 }
 
 client.login(process.env.DISCORD_TOKEN);
