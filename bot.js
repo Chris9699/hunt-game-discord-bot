@@ -101,7 +101,7 @@ client.on('messageCreate', async (message) => {
     // Generate latest.kml
     const latestPlacemarks = [];
     for (const sheetName of sheetNames) {
-      if (sheetName === sheetNames[0] || sheetName === 'Data') continue;
+      if (sheetName === 'Data') continue;
       
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: GOOGLE_SHEET_ID,
@@ -316,4 +316,5 @@ function generateKML(player, rows) {
 }
 
 client.login(process.env.DISCORD_TOKEN);
+
 
