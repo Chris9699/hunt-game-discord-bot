@@ -56,7 +56,7 @@ client.on('messageCreate', async (message) => {
     // Sheet append
     await sheets.spreadsheets.values.append({
       spreadsheetId: GOOGLE_SHEET_ID,
-      range: `Sheet1!A:D`,
+      range: `Sheet1!A1`,
       valueInputOption: 'RAW',
       requestBody: {
         values: [[player, lat, lon, time]]
@@ -72,3 +72,4 @@ client.on('messageCreate', async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
