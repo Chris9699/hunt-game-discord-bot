@@ -41,86 +41,139 @@ client.on('messageCreate', async (message) => {
   if (message.channel.name !== PING_CHANNEL) return;
   if (message.author.bot) return;
   
-  if (!message.content.startsWith('NEUER PING')) {
-    console.log(`⏭️  Message doesn't start with 'NEUER PING'`);
-    return;
-  }
+  if (!message.content.startsWith('NEUER PING')) return;
 
   const match = message.content.match(/NEUER PING - (.+?) \((.+?)\): Lat([\d.-]+) Lon([\d.-]+)/i);
   
   if (!match) {
-    console.log(`❌ Format not recognized`);
     message.reply(`❌ Format: NEUER PING - Spieler X (dd.mm. HH:MM): LatXX.XXX LonXX.XXX`);
     return;
   }
 
   const [, player, time, lat, lon] = match;
-  console.log(`✅ Parsed: Player=${player}, Time=${time}, Lat=${lat}, Lon=${lon}`);
+  console.log(`✅ Parsed: ${player}, ${time}, ${lat}, ${lon}`);
   
   try {
-    // Get all sheet names
     const metadata = await sheets.spreadsheets.get({
       spreadsheetId: GOOGLE_SHEET_ID
     });
     
     const sheetNames = metadata.data.sheets.map(s => s.properties.title);
-    console.log(`📂 Existing sheets: ${sheetNames.join(', ')}`);
+    console.log(`📂 Sheets: ${sheetNames.join(', ')}`);
     
-    // Create sheet if doesn't exist
     if (!sheetNames.includes(player)) {
-      console.log(`📝 Creating new sheet: ${player}`);
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId: GOOGLE_SHEET_ID,
         requestBody: {
           requests: [{
-            addSheet: {
-              properties: { title: player }
-            }
+            addSheet: { properties: { title: player } }
           }]
         }
       });
       
-      // Add header
       await sheets.spreadsheets.values.update({
         spreadsheetId: GOOGLE_SHEET_ID,
         range: `${player}!A1:C1`,
         valueInputOption: 'RAW',
-        requestBody: {
-          values: [['Lat', 'Lon', 'Time']]
-        }
+        requestBody: { values: [['Lat', 'Lon', 'Time']] }
       });
-      console.log(`✅ Sheet created with headers`);
+      console.log(`✅ Sheet created: ${player}`);
     }
     
-    // Append ping to player sheet
     await sheets.spreadsheets.values.append({
       spreadsheetId: GOOGLE_SHEET_ID,
       range: `${player}!A:C`,
       valueInputOption: 'RAW',
-      requestBody: {
-        values: [[lat, lon, time]]
-      }
+      requestBody: { values: [[lat, lon, time]] }
     });
     
-    console.log(`✅ Ping added to sheet: ${player}`);
+    console.log(`✅ Ping added`);
     
-    // Get all data from player sheet
-    const response = await sheets.spreadsheets.values.get({
+    // Generate player KML
+    const playerResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: GOOGLE_SHEET_ID,
       range: `${player}!A:C`
     });
     
-    const rows = response.data.values || [];
-    console.log(`📊 Sheet ${player} has ${rows.length} rows (including header)`);
+    const playerRows = playerResponse.data.values?.slice(1) || [];
+    const playerKml = generateKML(player, playerRows);
     
-    // Generate KML from all pings (skip header)
-    const dataRows = rows.slice(1);
-    let placemarks = '';
-    let coordinates = [];
+    // Generate latest.kml with all players' latest pings
+    const latestPlacemarks = [];
     
-    dataRows.forEach((row) => {
-      const [rowLat, rowLon, rowTime] = row;
-      placemarks += `
+    for (const sheetName of sheetNames) {
+      if (sheetName === sheetNames[0]) continue; // Skip first sheet
+      
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: GOOGLE_SHEET_ID,
+        range: `${sheetName}!A:C`
+      });
+      
+      const rows = response.data.values?.slice(1) || [];
+      if (rows.length > 0) {
+        const lastRow = rows[rows.length - 1];
+        const [lastLat, lastLon, lastTime] = lastRow;
+        latestPlacemarks.push({
+          name: `${sheetName} - ${lastTime}`,
+          description: sheetName,
+          lon: lastLon,
+          lat: lastLat
+        });
+      }
+    }
+    
+    const latestKml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Latest Pings</name>
+${latestPlacemarks.map(p => `
+    <Placemark>
+      <name>${p.name}</name>
+      <description>${p.description}</description>
+      <Point>
+        <coordinates>${p.lon},${p.lat},0</coordinates>
+      </Point>
+    </Placemark>`).join('')}
+  </Document>
+</kml>`;
+    
+    const playerKmlFile = `${player}.kml`;
+    const latestKmlFile = 'latest.kml';
+    
+    fs.writeFileSync(playerKmlFile, playerKml);
+    fs.writeFileSync(latestKmlFile, latestKml);
+    
+    console.log(`✅ KMLs generated: ${playerKmlFile}, ${latestKmlFile}`);
+    
+    const kmlChannel = message.guild.channels.cache.find(ch => ch.name === KML_CHANNEL);
+    if (!kmlChannel) {
+      message.reply(`❌ #${KML_CHANNEL} not found`);
+      return;
+    }
+    
+    await kmlChannel.send({
+      content: `📍 **${player}** (${playerRows.length} pings)`,
+      files: [playerKmlFile, latestKmlFile]
+    });
+    
+    console.log(`✅ KMLs sent`);
+    message.reply(`✅ ${player} gespeichert (${playerRows.length} pings)`);
+    
+    fs.unlinkSync(playerKmlFile);
+    fs.unlinkSync(latestKmlFile);
+  } catch (error) {
+    console.error(`❌ ${error.message}`);
+    message.reply(`❌ ${error.message}`);
+  }
+});
+
+function generateKML(player, rows) {
+  let placemarks = '';
+  let coordinates = [];
+  
+  rows.forEach(row => {
+    const [rowLat, rowLon, rowTime] = row;
+    placemarks += `
     <Placemark>
       <name>${rowTime}</name>
       <description>${player}</description>
@@ -128,55 +181,27 @@ client.on('messageCreate', async (message) => {
         <coordinates>${rowLon},${rowLat},0</coordinates>
       </Point>
     </Placemark>`;
-      coordinates.push(`${rowLon},${rowLat},0`);
-    });
-    
-    // Add line if multiple pings
-    if (coordinates.length > 1) {
-      placemarks += `
+    coordinates.push(`${rowLon},${rowLat},0`);
+  });
+  
+  if (coordinates.length > 1) {
+    placemarks += `
     <Placemark>
       <name>${player} Bewegung</name>
-      <description>Bewegungsverlauf</description>
       <LineString>
         <coordinates>
           ${coordinates.join('\n          ')}
         </coordinates>
       </LineString>
     </Placemark>`;
-    }
-    
-    const kml = `<?xml version="1.0" encoding="UTF-8"?>
+  }
+  
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
     <name>${player}</name>${placemarks}
   </Document>
 </kml>`;
-    
-    const kmlFile = `${player}.kml`;
-    fs.writeFileSync(kmlFile, kml);
-    console.log(`✅ KML generated: ${kmlFile} (${dataRows.length} pings)`);
-    
-    // Send to KML channel
-    const kmlChannel = message.guild.channels.cache.find(ch => ch.name === KML_CHANNEL);
-    if (!kmlChannel) {
-      console.error(`❌ Channel #${KML_CHANNEL} not found`);
-      message.reply(`❌ Channel #${KML_CHANNEL} not found`);
-      return;
-    }
-    
-    await kmlChannel.send({
-      content: `📍 **${player}** (${dataRows.length} pings)`,
-      files: [kmlFile]
-    });
-    
-    console.log(`✅ KML sent to #${KML_CHANNEL}`);
-    message.reply(`✅ ${player} gespeichert (${dataRows.length} pings total)`);
-    
-    fs.unlinkSync(kmlFile);
-  } catch (error) {
-    console.error(`❌ Error: ${error.message}`);
-    message.reply(`❌ ${error.message}`);
-  }
-});
+}
 
 client.login(process.env.DISCORD_TOKEN);
