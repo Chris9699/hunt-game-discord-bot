@@ -3,7 +3,6 @@ const fs = require('fs');
 
 const PING_CHANNEL = process.env.PING_CHANNEL || 'pings';
 const GEO_FILE = 'pings.geojson';
-const GIST_URL = process.env.GIST_RAW_URL; // z.B. https://gist.githubusercontent.com/...
 
 let geoData = {
   type: 'FeatureCollection',
@@ -19,24 +18,37 @@ const client = new Client({
 });
 
 client.on('clientReady', () => {
-  console.log(`Bot logged in as ${client.user.tag}`);
+  console.log(`✅ Bot logged in as ${client.user.tag}`);
   loadGeoData();
 });
 
 client.on('messageCreate', (message) => {
-  if (message.channel.name !== PING_CHANNEL) return;
-  if (message.author.bot) return;
+  console.log(`📨 Message in ${message.channel.name}: "${message.content}" by ${message.author.username}`);
+  
+  if (message.channel.name !== PING_CHANNEL) {
+    console.log(`❌ Channel ${message.channel.name} ≠ ${PING_CHANNEL}`);
+    return;
+  }
+  
+  if (message.author.bot) {
+    console.log(`❌ Bot message ignored`);
+    return;
+  }
 
   const match = message.content.match(/Player:\s*(\w+),\s*Lat:\s*([\d.-]+),\s*Lon:\s*([\d.-]+),\s*Time:\s*(.+)/i);
   
-  if (!match) return;
+  if (!match) {
+    console.log(`❌ Format nicht erkannt`);
+    return;
+  }
 
   const [, player, lat, lon, time] = match;
+  console.log(`✅ Parsed: Player=${player}, Lat=${lat}, Lon=${lon}, Time=${time}`);
   
   addPing(player, parseFloat(lat), parseFloat(lon), time);
   saveGeoData();
+  console.log(`✅ GeoJSON gespeichert. Features: ${geoData.features.length}`);
   
-  console.log(`[${player}] Lat: ${lat}, Lon: ${lon}`);
   message.reply(`✅ Ping: ${player} @ ${time}`);
 });
 
@@ -58,11 +70,15 @@ function addPing(player, lat, lon, time) {
 
 function saveGeoData() {
   fs.writeFileSync(GEO_FILE, JSON.stringify(geoData, null, 2));
+  console.log(`💾 ${GEO_FILE} aktualisiert`);
 }
 
 function loadGeoData() {
   if (fs.existsSync(GEO_FILE)) {
     geoData = JSON.parse(fs.readFileSync(GEO_FILE));
+    console.log(`📂 GeoJSON geladen: ${geoData.features.length} features`);
+  } else {
+    console.log(`📂 Neue GeoJSON erstellt`);
   }
 }
 
