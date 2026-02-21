@@ -183,10 +183,10 @@ async function generateAndSendLatest() {
     const latestKml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <n>Latest Pings</n>
+    <name>Latest Pings</name>
 ${latestPlacemarks.map(p => `
     <Placemark>
-      <n>${p.name}</n>
+      <name>${p.name}</name>
       <description>${p.description}</description>
       <Point>
         <coordinates>${p.lon},${p.lat},0</coordinates>
@@ -313,7 +313,7 @@ function generateKML(player, rows) {
     const [rowLat, rowLon, rowTime] = row;
     placemarks += `
     <Placemark>
-      <n>${rowTime}</n>
+      <name>${rowTime}</name>
       <description>${player}</description>
       <Point>
         <coordinates>${rowLon},${rowLat},0</coordinates>
@@ -325,7 +325,7 @@ function generateKML(player, rows) {
   if (coordinates.length > 1) {
     placemarks += `
     <Placemark>
-      <n>${player} Bewegung</n>
+      <name>${player} Bewegung</name>
       <LineString>
         <coordinates>
           ${coordinates.join('\n          ')}
@@ -337,9 +337,10 @@ function generateKML(player, rows) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <n>${player}</n>${placemarks}
+    <name>${player}</name>${placemarks}
   </Document>
 </kml>`;
 }
 
 client.login(process.env.DISCORD_TOKEN);
+
