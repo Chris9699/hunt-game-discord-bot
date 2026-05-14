@@ -13,6 +13,7 @@ let processingQueue = [];
 let isProcessing = false;
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const knownSheets = new Set();
 
 const client = new Client({
   intents: [
@@ -56,6 +57,11 @@ client.on('messageCreate', async (message) => {
 
   const [, player, time, lat, lon] = match;
   console.log(`📨 Ping queued: ${player} (queue: ${processingQueue.length})`);
+
+  if (!sheets) {
+    message.reply(`❌ Bot noch nicht bereit, bitte kurz warten.`);
+    return;
+  }
   
   processingQueue.push({ message, player, time, lat, lon });
   processQueue();
@@ -72,13 +78,14 @@ async function processQueue() {
     console.log(`⏳ Processing: ${player} (${processingQueue.length} left in queue)`);
     
     try {
-      const metadata = await sheets.spreadsheets.get({
-        spreadsheetId: GOOGLE_SHEET_ID
-      });
-      
-      const sheetNames = metadata.data.sheets.map(s => s.properties.title);
-      
-      if (!sheetNames.includes(player)) {
+      if (!knownSheets.has(player)) {
+        const metadata = await sheets.spreadsheets.get({
+          spreadsheetId: GOOGLE_SHEET_ID
+        });
+        metadata.data.sheets.forEach(s => knownSheets.add(s.properties.title));
+      }
+
+      if (!knownSheets.has(player)) {
         await sheets.spreadsheets.batchUpdate({
           spreadsheetId: GOOGLE_SHEET_ID,
           requestBody: {
@@ -94,6 +101,7 @@ async function processQueue() {
           valueInputOption: 'RAW',
           requestBody: { values: [['Lat', 'Lon', 'Time']] }
         });
+        knownSheets.add(player);
         console.log(`✅ Sheet created: ${player}`);
       }
       
