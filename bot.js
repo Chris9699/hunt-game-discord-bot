@@ -12,6 +12,8 @@ let auth;
 let processingQueue = [];
 let isProcessing = false;
 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -141,6 +143,10 @@ async function processQueue() {
     } catch (error) {
       console.error(`❌ ${error.message}`);
       message.reply(`❌ ${error.message}`);
+    }
+
+    if (processingQueue.length > 0) {
+      await sleep(1200);
     }
   }
   
